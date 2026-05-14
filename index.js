@@ -244,7 +244,7 @@ bot.use(createConversation(viewPendingLeavesConversation));
 
 // ==================== Command List ====================
 
-cron.schedule("30 7 * * 6", async () => {
+cron.schedule("45 7 * * 6", async () => {
     try {
         const dailyReport = await generateTrainingMessage();
         await bot.api.sendMessage(
