@@ -178,9 +178,9 @@ async function applyLeaveConversation(conversation, ctx) {
         await bot.api.sendMessage(fortitudeCommChatId,
                 `<b>New Leave Application</b>\n`
                 + `Name: ${name}\n`
-                + `Date: ${date}`
+                + `Date: ${date}\n`
                 + `Reason: ${reason}`,
-                {parse_mode: 'HTML'}
+                { message_thread_id: fortitudeCommAttendanceMessageThreadId, parse_mode: 'HTML'}
         )
     } catch (err) {
         await ctx.reply(err.message);
