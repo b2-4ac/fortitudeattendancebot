@@ -241,10 +241,16 @@ async function viewPendingLeavesConversation(conversation, ctx) {
                 idx = parseInt(reply.match(approveRegex)[1]);
                 const leaveId = indexToId.get(idx);
                 await approveLeave(leaveId);
+                const leave = pendingLeaves[idx - 1];
+                await bot.api.sendMessage(leave.telegram_id, 
+                        `Your leave on ${leave.date} has been approved`);
             } else {
                 idx = parseInt(reply.match(rejectRegex)[1]);
                 const leaveId = indexToId.get(idx);
                 await rejectLeave(leaveId);
+                const leave = pendingLeaves[idx - 1];
+                await bot.api.sendMessage(leave.telegram_id, 
+                        `Your leave on ${leave.date} has been rejected`);
             }
             pendingLeaves.splice(idx - 1, 1);
             indexToId.clear();

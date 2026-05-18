@@ -137,7 +137,7 @@ export async function cancelLeave(id) {
 export async function getPendingLeaves() {
     const { data, error } = await supabase
         .from('leaves')
-        .select('id, name, date, reason')
+        .select('id, telegram_id, name, date, reason')
         .eq('status', 'PENDING')
 
     if (error) {
