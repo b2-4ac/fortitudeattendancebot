@@ -108,6 +108,32 @@ export async function applyLeave(id, name, date, reason) {
     }
 }
 
+export async function getLeaveIdByUserandDate(id, dateString) {
+    const { data, error } = await supabase
+        .from('leaves')
+        .select()
+        .eq('telegram_id', id)
+        .eq('date', dateString)
+        .single();
+
+    if (error) {
+        throw new Error(error.message);
+    }
+
+    return data;
+}
+
+export async function cancelLeave(id) {
+    const { error } = await supabase
+        .from('leaves')
+        .update({status: "CANCELLED"})
+        .eq('id', id);
+
+    if (error) {
+        throw new Error(error.message);
+    }
+}
+
 export async function getPendingLeaves() {
     const { data, error } = await supabase
         .from('leaves')

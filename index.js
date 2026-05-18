@@ -14,7 +14,9 @@ import { addMember,
         getOffDays,
         getAllMembers,
         getAbsencesByName,
-        getAbsencesByDate } from "./database.js";
+        getAbsencesByDate,
+        getLeaveIdByUserandDate,
+        cancelLeave } from "./database.js";
 import { MemberNotFoundError } from './errortypes.js';
 
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -60,6 +62,14 @@ async function isAuthorisedUser(id) {
     }
 }
 
+async function sendToComm(message) {
+    await bot.api.sendMessage(
+            fortitudeCommChatId,
+            message,
+            { message_thread_id: fortitudeCommAttendanceMessageThreadId,
+                    parse_mode: 'HTML'});
+}
+
 function isSaturday(dateString) {
     const [day, month, year] = dateString.split("-");
     const IsoYmdString = year + "-" + month + "-" + day;
@@ -90,6 +100,7 @@ async function countTrainings() {
 }
 
 async function generateTrainingMessage() {
+    console.log("Generating Training Message...");
     const today = new Date().toISOString().split("T")[0];
     const leaves = await getAbsencesByDate(today);
 
@@ -244,8 +255,10 @@ bot.use(createConversation(viewPendingLeavesConversation));
 
 // ==================== Command List ====================
 
-cron.schedule("30 7 * * 6", async () => {
+cron.schedule("40 7 * * 6", async () => {
     try {
+        console.log("Time: ", new Date().toISOString());
+        console.log("Starting Cron Job...");
         const dailyReport = await generateTrainingMessage();
         await bot.api.sendMessage(
                 fortitudeCommChatId,
@@ -342,6 +355,33 @@ bot.command("applyleave", async (ctx) => {
         return;
     }
     await ctx.conversation.enter("applyLeaveConversation");
+})
+
+bot.command("cancelleave", async (ctx) => {
+    var id = ctx.from.id;
+    var dateString = ctx.match;
+    try {
+        var isValid = await isValidUser(id);
+        if (!isValid) {
+            ctx.reply("You are not a registered user");
+            return;
+        }
+        if (dateString == "" || !dateRegex.test(dateString)) {
+            ctx.reply("Invalid Command Format.");
+            return;
+        }
+        const leave = await getLeaveIdByUserandDate(id, dateString);
+        await cancelLeave(leave.id);
+
+        var commNotif = `<b> New Cancelled Leave </b>\n`
+                + `${leave.name} has cancelled their leave on ${leave.date}`
+
+        await sendToComm(commNotif);
+
+    } catch (err) {
+        ctx.reply(err.message);
+        return;
+    }
 })
 
 bot.command("viewpending", async (ctx) => {
