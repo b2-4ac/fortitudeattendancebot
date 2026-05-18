@@ -210,7 +210,10 @@ async function viewPendingLeavesConversation(conversation, ctx) {
             return;
         }
         for (var [index, leave] of pendingLeaves.entries()) {
-            leaveList += `${index + 1}.\nName: ${leave.name}\nDate: ${leave.date}\nReason: ${leave.reason}\n`
+            leaveList += `${index + 1}.\n`
+                    + `Name: ${leave.name}\n`
+                    + `Date: ${leave.date}\n`
+                    + `Reason: ${leave.reason}\n`
             indexToId.set(index + 1, leave.id);
         }
         await ctx.reply("Pending Leaves:\n\n"
@@ -252,6 +255,43 @@ async function viewPendingLeavesConversation(conversation, ctx) {
     }
 }
 bot.use(createConversation(viewPendingLeavesConversation));
+
+async function cancelLeaveConversation(conversation, ctx) {
+    await ctx.reply("Please indicate the date of leave to cancel in DD-MM-YYYY format: \n\n"
+            + "Enter `exit` to terminate this transaction."
+    );
+
+    while (true) {
+        var dateCtx = await conversation.waitFor("message:text");
+        var date = dateCtx.message.text;
+
+        if (date == "exit") {
+            ctx.reply("Terminated");
+            return;
+        }
+
+        if (dateRegex.test(date) && isSaturday(date)) {
+            break;
+        }
+        await ctx.reply("Invalid date entered. Please try again.");
+    }
+
+    try {
+        var userId = ctx.from.id;
+        const leave = await getLeaveIdByUserandDate(userId, dateString);
+        await cancelLeave(leave.id);
+        await ctx.reply("Leave Cancelled");
+
+        var commNotif = `<b> New Cancelled Leave </b>\n`
+                + `${leave.name} has cancelled their leave on ${leave.date}`
+
+        await sendToComm(commNotif);
+    } catch (err) {
+        ctx.reply(err.message);
+        return;
+    }
+}
+bot.use(createConversation(cancelLeaveConversation));
 
 // ==================== Command List ====================
 
@@ -359,29 +399,17 @@ bot.command("applyleave", async (ctx) => {
 
 bot.command("cancelleave", async (ctx) => {
     var id = ctx.from.id;
-    var dateString = ctx.match;
     try {
         var isValid = await isValidUser(id);
         if (!isValid) {
             ctx.reply("You are not a registered user");
             return;
         }
-        if (dateString == "" || !dateRegex.test(dateString)) {
-            ctx.reply("Invalid Command Format.");
-            return;
-        }
-        const leave = await getLeaveIdByUserandDate(id, dateString);
-        await cancelLeave(leave.id);
-
-        var commNotif = `<b> New Cancelled Leave </b>\n`
-                + `${leave.name} has cancelled their leave on ${leave.date}`
-
-        await sendToComm(commNotif);
-
     } catch (err) {
         ctx.reply(err.message);
         return;
     }
+    await ctx.conversation.enter("cancelLeaveConversation");
 })
 
 bot.command("viewpending", async (ctx) => {
