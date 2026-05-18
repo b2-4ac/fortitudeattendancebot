@@ -7,6 +7,7 @@ import { addMember,
         getMemberRole,
         makeCommitteeMember,
         getNameById,
+        getIdByName,
         applyLeave,
         getPendingLeaves,
         approveLeave,
@@ -16,7 +17,8 @@ import { addMember,
         getAbsencesByName,
         getAbsencesByDate,
         getLeaveIdByUserandDate,
-        cancelLeave } from "./database.js";
+        cancelLeave, 
+        markAbsent} from "./database.js";
 import { MemberNotFoundError } from './errortypes.js';
 
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -299,6 +301,64 @@ async function cancelLeaveConversation(conversation, ctx) {
 }
 bot.use(createConversation(cancelLeaveConversation));
 
+async function markAbsentConversation(conversation, ctx) {
+    await ctx.reply("Enter the name of the member to mark as absent: \n\n"
+            + "Enter `exit` to terminate this conversation")
+
+    var memberNamelist = await conversation.external(() => getAllMembers());
+    memberNamelist = memberNamelist.map((m) => m.name);
+
+    while (true) {
+        var nameCtx = await conversation.waitFor("message:text");
+        var name = nameCtx.message.text;
+
+        if (name == "exit") {
+            await ctx.reply("Terminated");
+            return;
+        }
+
+        name = name.toUpperCase();
+        if (!memberNamelist.includes(name)) {
+            ctx.reply("Invalid Member. Try Again");
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    await ctx.reply("Enter the date of training during which the member was missing in DD-MM-YYYY format: \n\n"
+            + "Enter `exit` to terminate this conversation.")
+
+    while (true) {
+        var dateCtx = await conversation.waitFor("message:text");
+        var date = dateCtx.message.text;
+
+        if (date == "exit") {
+            await ctx.reply("Terminated");
+            return;
+        }
+
+        if (!dateRegex.test(date) || !isSaturday(date)) {
+            await ctx.reply("Invalid Date Format");
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    try {
+        var userId = await getIdByName(name);
+        await markAbsent(userId, name, date);
+        await ctx.reply(`Marked ${name} as absent on ${date}`);
+        await bot.api.sendMessage(userId,
+                `You have missed training on ${date} without reason and are marked as absent`);
+    } catch (err) {
+        ctx.reply(err.message);
+        return;
+    }
+}
+bot.use(createConversation(markAbsentConversation));
+
 // ==================== Command List ====================
 
 cron.schedule("40 7 * * 6", async () => {
@@ -343,17 +403,17 @@ bot.command("register", async (ctx) => {
     ctx.reply(response);
 })
 
-bot.command("getrole", async (ctx) => {
-    var name = ctx.from.first_name;
-    var id = ctx.from.id;
-    try {
-        var response = await getMemberRole(name);
-    } catch (err) {
-        response = err.message;
-    }
+// bot.command("getrole", async (ctx) => {
+//     var name = ctx.from.first_name;
+//     var id = ctx.from.id;
+//     try {
+//         var response = await getMemberRole(name);
+//     } catch (err) {
+//         response = err.message;
+//     }
 
-    ctx.reply(response);
-})
+//     ctx.reply(response);
+// })
 
 bot.command("setcomm", async (ctx) => {
     var name = ctx.from.first_name;
@@ -416,6 +476,21 @@ bot.command("cancelleave", async (ctx) => {
         return;
     }
     await ctx.conversation.enter("cancelLeaveConversation");
+})
+
+bot.command("markabsent", async (ctx) => {
+    var id = ctx.from.id;
+    try {
+        var isAuthorised = await isAuthorisedUser(id);
+        if (!isAuthorised) {
+            ctx.reply("You do not have the permissions for this command");
+            return;
+        }
+    } catch (err) {
+        ctx.reply(err.message);
+        return;
+    }
+    await ctx.conversation.enter("markAbsentConversation");
 })
 
 bot.command("viewpending", async (ctx) => {

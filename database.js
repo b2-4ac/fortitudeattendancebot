@@ -34,6 +34,20 @@ export async function getNameById(id) {
     return data.name;
 }
 
+export async function getIdByName(name) {
+    const { data, error } = await supabase
+        .from('members')
+        .select('telegram_id')
+        .eq('name', name)
+        .single();
+
+    if (error) {
+        throw new Error(error.message);
+    }
+
+    return data.telegram_id;
+}
+
 export async function getMember(id) {
     const { data, error } = await supabase
         .from('members')
@@ -134,6 +148,16 @@ export async function cancelLeave(id) {
     }
 }
 
+export async function markAbsent(id, name, date) {
+    const { error } = await supabase
+        .from('leaves')
+        .insert({telegram_id: id, name: name, date: date, status: 'ABSENT'});
+
+    if (error) {
+        throw new Error(error.message);
+    }
+}
+
 export async function getPendingLeaves() {
     const { data, error } = await supabase
         .from('leaves')
@@ -186,7 +210,7 @@ export async function getAbsencesByName(name, startDate, endDate) {
         .from('leaves')
         .select()
         .eq('name', name)
-        .eq('status', 'APPROVED')
+        .or('status.eq.APPROVED, status.eq.ABSENT')
         .gte('date', startDate)
         .lte('date', endDate)
 
