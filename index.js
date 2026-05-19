@@ -243,7 +243,6 @@ async function viewPendingLeavesConversation(conversation, ctx) {
                 const leaveId = indexToId.get(idx);
                 await approveLeave(leaveId);
                 const leave = pendingLeaves[idx - 1];
-                console.log(leave);
                 await conversation.external(() => {
                     bot.api.sendMessage(leave.telegram_id, 
                         `Your leave on ${leave.date} has been approved`)
