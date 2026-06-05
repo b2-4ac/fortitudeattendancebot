@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Bot, Context } from "grammy";
+import { Bot, InlineKeyboard } from "grammy";
 import cron from "node-cron";
 import { conversations, createConversation } from "@grammyjs/conversations"
 import { addMember,
@@ -16,9 +16,10 @@ import { addMember,
         getAllMembers,
         getAbsencesByName,
         getAbsencesByDate,
-        getLeaveIdByUserandDate,
+        getLeaveByUserandDate,
         cancelLeave, 
-        markAbsent} from "./database.js";
+        markAbsent,
+        getLeaveById} from "./database.js";
 import { MemberNotFoundError } from './errortypes.js';
 
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
@@ -101,10 +102,9 @@ async function countTrainings() {
     return trainingCount;
 }
 
-async function generateTrainingMessage() {
-    console.log("Generating Training Message...");
-    const today = new Date().toISOString().split("T")[0];
-    const leaves = await getAbsencesByDate(today);
+async function generateTrainingMessage(date) {
+    console.log("(INFO) ", "Generating Training Message...");
+    const leaves = await getAbsencesByDate(date);
 
     var approvedLeavesArray = [];
     var pendingLeavesArray = [];
@@ -143,7 +143,7 @@ async function generateTrainingMessage() {
         presentMembersString += `${index + 1}. ${name}\n`;
     }
 
-    var reportString = `<b> Attendance Report for ${today} </b>\n\n`
+    var reportString = `<b> Attendance Report for ${date} </b>\n\n`
             + presentMembersString + "\n"
             + approvedLeavesString + "\n"
             + pendingLeavesString + "\n"
@@ -156,11 +156,14 @@ async function generateTrainingMessage() {
 
 async function applyLeaveConversation(conversation, ctx) {
 
-    await ctx.reply("Please enter the date of requested leave in DD-MM-YYYY format\n\nEnter `exit` to terminate this transaction");
+    await ctx.reply("Please enter the date of requested leave in DD-MM-YYYY format\n\n"
+            + "Enter `exit` to terminate this transaction");
 
     while (true) {
         var dateCtx = await conversation.waitFor("message:text");
         var date = dateCtx.message.text;
+
+        console.log("Date Entered: ", date);
 
         if (date == "exit") {
             ctx.reply("Terminated");
@@ -177,6 +180,8 @@ async function applyLeaveConversation(conversation, ctx) {
     var reasonCtx = await conversation.waitFor("message:text");
     var reason = reasonCtx.message.text;
 
+    console.log("Reason Entered: ", reason);
+
     if (reason == "exit") {
         ctx.reply("Terminated");
         return;
@@ -185,16 +190,27 @@ async function applyLeaveConversation(conversation, ctx) {
     const id = ctx.from.id;
 
     try {
+        // Retrieve Applicant Name
         const name = await getNameById(id);
+
+        // Apply Leave in Database
         await applyLeave(id, name, date, reason);
         await ctx.reply("Your leave application has been sent for approval");
+        const newLeave = await getLeaveByUserandDate(id, date);
+
+        // Notify Committee
+        const keyboard = new InlineKeyboard()
+                .text("Approve", `approve:${newLeave.id}`)
+                .text("Reject", `reject:${newLeave.id}`);
         await bot.api.sendMessage(fortitudeCommChatId,
                 `<b>New Leave Application</b>\n`
                 + `Name: ${name}\n`
                 + `Date: ${date}\n`
                 + `Reason: ${reason}`,
-                { message_thread_id: fortitudeCommAttendanceMessageThreadId, parse_mode: 'HTML'}
-        )
+                { message_thread_id: fortitudeCommAttendanceMessageThreadId,
+                        parse_mode: 'HTML',
+                        reply_markup: keyboard}
+        );
     } catch (err) {
         await ctx.reply(err.message);
     }
@@ -289,7 +305,7 @@ async function cancelLeaveConversation(conversation, ctx) {
 
     try {
         var userId = ctx.from.id;
-        const leave = await getLeaveIdByUserandDate(userId, dateString);
+        const leave = await getLeaveByUserandDate(userId, date);
         await cancelLeave(leave.id);
         await ctx.reply("Leave Cancelled");
 
@@ -362,13 +378,53 @@ async function markAbsentConversation(conversation, ctx) {
 }
 bot.use(createConversation(markAbsentConversation));
 
-// ==================== Command List ====================
+// ==================== Handle Button Callback ====================
+
+bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const leaveId = ctx.match[1];
+    try {
+        const targetLeave = await getLeaveById(leaveId);
+        await approveLeave(leaveId);
+        bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been approved`)
+        ctx.editMessageText(
+            "<b>APPROVED</b>\n"
+            + `Name: ${targetLeave.name}\n`
+            + `Date: ${targetLeave.date}\n`
+            + `Reason: ${targetLeave.reason}`,
+            { reply_markup: undefined, parse_mode: 'HTML' }
+        );
+    } catch (err) {
+        ctx.reply(err.message)
+    }
+})
+
+bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
+    const leaveId = ctx.match[1];
+    try {
+        const targetLeave = await getLeaveById(leaveId);
+        await rejectLeave(leaveId);
+        bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been rejected`)
+        ctx.editMessage(
+            "<b>REJECTED</b>\n"
+            + `Name: ${targetLeave.name}\n`
+            + `Date: ${targetLeave.date}\n`
+            + `Reason: ${targetLeave.reason}`,
+            { reply_markup: undefined, parse_mode: 'HTML' }
+        );
+    } catch (err) {
+        ctx.reply(err.message)
+    }
+})
+
+// ==================== Scheduled Message ====================
 
 cron.schedule("40 7 * * 6", async () => {
     try {
-        console.log("Time: ", new Date().toISOString());
+        console.log("Time: ", new Date().toString());
         console.log("Starting Cron Job...");
-        const dailyReport = await generateTrainingMessage();
+        const today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
+        const dailyReport = await generateTrainingMessage(today);
         await bot.api.sendMessage(
                 fortitudeCommChatId,
                 dailyReport,
@@ -377,6 +433,8 @@ cron.schedule("40 7 * * 6", async () => {
         console.log(err);
     }
 })
+
+// ==================== Command List ====================
 
 bot.command("register", async (ctx) => {
     var name = ctx.from.first_name;
@@ -452,6 +510,8 @@ bot.command("setcomm", async (ctx) => {
 })
 
 bot.command("applyleave", async (ctx) => {
+    console.log("Time: ", new Date().toString());
+    console.log("(INFO) ", "Leave Application Called");
     var id = ctx.from.id;
     try {
         var isValid = await isValidUser(id);
@@ -467,6 +527,8 @@ bot.command("applyleave", async (ctx) => {
 })
 
 bot.command("cancelleave", async (ctx) => {
+    console.log("Time: ", new Date().toString());
+    console.log("(INFO) ", "Leave Cancellation Called");
     var id = ctx.from.id;
     try {
         var isValid = await isValidUser(id);
@@ -513,8 +575,8 @@ bot.command("viewpending", async (ctx) => {
 
 bot.command("viewreport", async (ctx) => {
     const today = new Date();
-    const startDate = new Date(today.getFullYear(), 0, 1).toISOString().split("T")[0];
-    const endDate = today.toISOString().split("T")[0];
+    const startDate = new Date(today.getFullYear(), 0, 1).toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
+    const endDate = today.toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
 
     const trainingDays = await countTrainings();
     let memberList = await getAllMembers();
@@ -536,4 +598,35 @@ bot.command("viewreport", async (ctx) => {
     ctx.reply(report, {parse_mode: 'HTML'});
 })
 
+bot.command("upcoming", async (ctx) => {
+    var id = ctx.from.id;
+    try {
+        var isAuthorised = await isAuthorisedUser(id);
+        if (!isAuthorised) {
+            ctx.reply("You do not have the permissions for this command");
+            return;
+        }
+
+        var curr = new Date();
+        while (curr.getDay() != 6) {
+            curr.setDate(curr.getDate() + 1);
+        }
+
+        const dateString = curr.toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
+        const report = await generateTrainingMessage(dateString);
+
+        await ctx.reply(report, {parse_mode: "HTML"});
+    } catch (err) {
+        ctx.reply(err.message);
+        return;
+    }
+
+})
+
+bot.catch((err) => {
+    console.log(err);
+})
+
+console.log("Bot starting")
 bot.start();
+console.log("Bot started")

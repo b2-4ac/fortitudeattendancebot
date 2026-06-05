@@ -122,13 +122,27 @@ export async function applyLeave(id, name, date, reason) {
     }
 }
 
-export async function getLeaveIdByUserandDate(id, dateString) {
+export async function getLeaveByUserandDate(id, dateString) {
     const { data, error } = await supabase
         .from('leaves')
         .select()
         .eq('telegram_id', id)
         .eq('date', dateString)
         .single();
+
+    if (error) {
+        throw new Error(error.message);
+    }
+
+    return data;
+}
+
+export async function getLeaveById(leaveId) {
+    const { data, error } = await supabase
+        .from('leaves')
+        .select()
+        .eq('id', leaveId)
+        .single()
 
     if (error) {
         throw new Error(error.message);
