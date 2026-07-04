@@ -1,26 +1,32 @@
 import 'dotenv/config';
+
 import { Bot, InlineKeyboard } from "grammy";
-import cron from "node-cron";
 import { conversations, createConversation } from "@grammyjs/conversations"
-import { addMember,
-        getMember,
-        getMemberRole,
-        makeCommitteeMember,
-        getNameById,
-        getIdByName,
-        applyLeave,
-        getPendingLeaves,
-        approveLeave,
-        rejectLeave,
-        getOffDays,
-        getAllMembers,
-        getAbsencesByName,
-        getAbsencesByDate,
-        getLeaveByUserandDate,
-        cancelLeave, 
-        markAbsent,
-        getLeaveById} from "./database.js";
-import { MemberNotFoundError } from './errortypes.js';
+
+import cron from "node-cron"
+
+import {
+    addMember,
+    getIdByName,
+    getMemberById,
+    getAllMemberNames,
+    getMemberRole,
+    makeCommitteeMember 
+} from "./database/member.js"
+import { 
+    applyLeave,
+    cancelLeave,
+    approveLeave,
+    rejectLeave,
+    markAbsent,
+    getLeaveById,
+    getLeaveByUserIdAndDate,
+    getPendingLeaves,
+    getAbsencesByName,
+    getAbsencesByDate 
+} from "./database/leaves.js"
+import { getOffDays } from "./database/offDays.js"
+import { MemberNotFoundError } from './errortypes.js'
 
 const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
 const fortitudeCommChatId = process.env.FORTITUDE_COMM_CHAT_ID;
@@ -37,7 +43,7 @@ const rejectRegex = /^reject\s+(\d+)$/;
 
 async function isValidUser(id) {
     try {
-        var userDetails = await getMember(id);
+        var userDetails = await getMemberById(id);
     } catch (err) {
         if (err instanceof MemberNotFoundError) {
             return false;
@@ -135,7 +141,7 @@ async function generateTrainingMessage(date) {
         rejectedLeavesString += `${index + 1}. ${name}\n`;
     }
 
-    var allMembers = await getAllMembers();
+    var allMembers = await getAllMemberNames();
     var nameOnlyList = allMembers.map((member) => member.name);
     var presentMembers = nameOnlyList.filter((name) => !approvedLeavesArray.includes(name));
     var presentMembersString = `Present (${presentMembers.length}):\n`;
@@ -191,12 +197,13 @@ async function applyLeaveConversation(conversation, ctx) {
 
     try {
         // Retrieve Applicant Name
-        const name = await getNameById(id);
+        const member = await getMemberById(id);
+        const name = member.name;
 
         // Apply Leave in Database
         await applyLeave(id, name, date, reason);
         await ctx.reply("Your leave application has been sent for approval");
-        const newLeave = await getLeaveByUserandDate(id, date);
+        const newLeave = await getLeaveByUserIdAndDate(id, date);
 
         // Notify Committee
         const keyboard = new InlineKeyboard()
@@ -305,7 +312,7 @@ async function cancelLeaveConversation(conversation, ctx) {
 
     try {
         var userId = ctx.from.id;
-        const leave = await getLeaveByUserandDate(userId, date);
+        const leave = await getLeaveByUserIdAndDate(userId, date);
         await cancelLeave(leave.id);
         await ctx.reply("Leave Cancelled");
 
@@ -324,7 +331,7 @@ async function markAbsentConversation(conversation, ctx) {
     await ctx.reply("Enter the name of the member to mark as absent: \n\n"
             + "Enter `exit` to terminate this conversation")
 
-    var memberNamelist = await conversation.external(() => getAllMembers());
+    var memberNamelist = await conversation.external(() => getAllMemberNames());
     memberNamelist = memberNamelist.map((m) => m.name);
 
     while (true) {
@@ -405,7 +412,7 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
         const targetLeave = await getLeaveById(leaveId);
         await rejectLeave(leaveId);
         bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been rejected`)
-        ctx.editMessage(
+        ctx.editMessageText(
             "<b>REJECTED</b>\n"
             + `Name: ${targetLeave.name}\n`
             + `Date: ${targetLeave.date}\n`
@@ -579,7 +586,7 @@ bot.command("viewreport", async (ctx) => {
     const endDate = today.toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
 
     const trainingDays = await countTrainings();
-    let memberList = await getAllMembers();
+    let memberList = await getAllMemberNames();
     var attendanceList = await Promise.all(memberList.map( async (m) => {
         const allAbsences = await getAbsencesByName(m.name, startDate, endDate);
         const numAbsences = allAbsences.length;
