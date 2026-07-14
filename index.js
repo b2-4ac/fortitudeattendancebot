@@ -120,6 +120,7 @@ async function generateTrainingMessage(date) {
     var approvedLeavesArray = [];
     var pendingLeavesArray = [];
     var rejectedLeavesArray = [];
+    var cancelledLeavesArray = [];
 
     for (const leave of leaves) {
         if (leave.status == "APPROVED") {
@@ -128,6 +129,8 @@ async function generateTrainingMessage(date) {
             pendingLeavesArray.push(leave.name);
         } else if (leave.status == "REJECTED") {
             rejectedLeavesArray.push(leave.name);
+        } else if (leave.status == "CANCELLED") {
+            cancelledLeavesArray.push(leave.name);
         } else {
             return "An error has occurred";
         }
@@ -145,6 +148,10 @@ async function generateTrainingMessage(date) {
     for (const [ index, name ] of rejectedLeavesArray.entries()) {
         rejectedLeavesString += `${index + 1}. ${name}\n`;
     }
+    var cancelledLeavesString = `Cancelled Leaves (${cancelledLeavesArray.length}):\n`
+    for (const [ index, name ] of cancelledLeavesArray.entries()) {
+        cancelledLeavesString += `${index + 1}. ${name}\n`;
+    }
 
     var allMembers = await getAllMemberNames();
     var nameOnlyList = allMembers.map((member) => member.name);
@@ -158,7 +165,8 @@ async function generateTrainingMessage(date) {
             + presentMembersString + "\n"
             + approvedLeavesString + "\n"
             + pendingLeavesString + "\n"
-            + rejectedLeavesString + "\n";
+            + rejectedLeavesString + "\n"
+            + cancelledLeavesString + "\n";
 
     return reportString;
 }
