@@ -79,9 +79,14 @@ async function sendToComm(message) {
                     parse_mode: 'HTML'});
 }
 
+function convertToEnCa(ddmmyyyyString) {
+    const [day, month, year] = ddmmyyyyString.split("-");
+    const enCaString = year + "-" + month + "-" + day;
+    return enCaString;
+}
+
 function isSaturday(dateString) {
-    const [day, month, year] = dateString.split("-");
-    const IsoYmdString = year + "-" + month + "-" + day;
+    const IsoYmdString = convertToEnCa(dateString)
     const leaveDate = new Date(IsoYmdString);
     return leaveDate.getDay() == 6;
 }
