@@ -398,6 +398,38 @@ async function markAbsentConversation(conversation, ctx) {
 }
 bot.use(createConversation(markAbsentConversation));
 
+async function viewUpcomingAttendanceConversation(conversation, ctx) {
+    await ctx.reply("Enter the date of training: \n\n"
+            + "Enter `exit` to terminate this conversation")
+
+    while (true) {
+        var dateCtx = await conversation.waitFor("message:text");
+        var date = dateCtx.message.text;
+
+        if (date == "exit") {
+            await ctx.reply("Terminated");
+            return;
+        }
+
+        if (!dateRegex.test(date) || !isSaturday(date)) {
+            await ctx.reply("Invalid Date Format");
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    try {
+        var enCaDate = convertToEnCa(date);
+        const report = await generateTrainingMessage(enCaDate);
+
+        await ctx.reply(report, {parse_mode: "HTML"});
+    } catch (err) {
+        ctx.reply(err.message)
+    }
+}
+bot.use(createConversation(viewUpcomingAttendanceConversation))
+
 // ==================== Handle Button Callback ====================
 
 bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
@@ -626,20 +658,11 @@ bot.command("upcoming", async (ctx) => {
             ctx.reply("You do not have the permissions for this command");
             return;
         }
-
-        var curr = new Date();
-        while (curr.getDay() != 6) {
-            curr.setDate(curr.getDate() + 1);
-        }
-
-        const dateString = curr.toLocaleDateString("en-CA", {timeZone: "Asia/Singapore"});
-        const report = await generateTrainingMessage(dateString);
-
-        await ctx.reply(report, {parse_mode: "HTML"});
     } catch (err) {
         ctx.reply(err.message);
         return;
     }
+    await ctx.conversation.enter("viewUpcomingAttendanceConversation")
 
 })
 
