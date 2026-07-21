@@ -437,6 +437,9 @@ bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
     const leaveId = ctx.match[1];
     try {
         const targetLeave = await getLeaveById(leaveId);
+        if (targetLeave.status != "PENDING") {
+            return;
+        }
         await approveLeave(leaveId);
         bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been approved`)
         ctx.editMessageText(
@@ -455,6 +458,9 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
     const leaveId = ctx.match[1];
     try {
         const targetLeave = await getLeaveById(leaveId);
+        if (targetLeave.status != "PENDING") {
+            return;
+        }
         await rejectLeave(leaveId);
         bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been rejected`)
         ctx.editMessageText(
