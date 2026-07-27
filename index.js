@@ -182,7 +182,7 @@ async function applyLeaveConversation(conversation, ctx) {
         var dateCtx = await conversation.waitFor("message:text");
         var date = dateCtx.message.text;
 
-        console.log("Date Entered: ", date);
+        conversation.external(() => console.log("Date Entered: ", date));
 
         if (date == "exit") {
             ctx.reply("Terminated");
@@ -199,7 +199,7 @@ async function applyLeaveConversation(conversation, ctx) {
     var reasonCtx = await conversation.waitFor("message:text");
     var reason = reasonCtx.message.text;
 
-    console.log("Reason Entered: ", reason);
+    conversation.external(() => console.log("Reason Entered: ", reason));
 
     if (reason == "exit") {
         ctx.reply("Terminated");
