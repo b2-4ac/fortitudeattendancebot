@@ -2,10 +2,10 @@ import 'dotenv/config';
 import supabase from '../config/supabase.js';
 import { DuplicateLeaveError } from '../errortypes.js'
 
-export async function applyLeave(id, name, date, reason) {
+export async function applyLeave(id, name, date, reason, batchId) {
     const { error } = await supabase
         .from('leaves')
-        .insert({telegram_id: id, name: name, date: date, reason: reason});
+        .insert({telegram_id: id, name: name, date: date, reason: reason, batch_id: batchId});
 
     if (error) {
         if (error.code = '23505') {
@@ -27,22 +27,22 @@ export async function cancelLeave(id) {
     }
 }
 
-export async function approveLeave(id) {
+export async function approveLeave(batchId) {
     const { error } = await supabase
         .from('leaves')
         .update({status: "APPROVED"})
-        .eq('id', id)
+        .eq('batch_id', batchId)
 
     if (error) {
         throw new Error(error.message);
     }
 }
 
-export async function rejectLeave(id) {
+export async function rejectLeave(batchId) {
     const { error } = await supabase
         .from('leaves')
         .update({status: "REJECTED"})
-        .eq('id', id)
+        .eq('batch_id', batchId)
 
     if (error) {
         throw new Error(error.message);
@@ -73,6 +73,19 @@ export async function getLeaveById(leaveId) {
     return data;
 }
 
+export async function getLeavesByBatchId(batchId) {
+    const { data, error } = await supabase
+        .from('leaves')
+        .select()
+        .eq('batch_id', batchId)
+
+    if (error) {
+        throw new Error(error.message);
+    }
+
+    return data;
+}
+
 export async function getLeaveByUserIdAndDate(id, dateString) {
     const { data, error } = await supabase
         .from('leaves')
@@ -91,7 +104,7 @@ export async function getLeaveByUserIdAndDate(id, dateString) {
 export async function getPendingLeaves() {
     const { data, error } = await supabase
         .from('leaves')
-        .select('id, telegram_id, name, date, reason')
+        .select('id, batch_id, telegram_id, name, date, reason')
         .eq('status', 'PENDING')
 
     if (error) {

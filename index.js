@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'node:crypto';
 
 import { Bot, InlineKeyboard } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations"
@@ -19,7 +20,7 @@ import {
     approveLeave,
     rejectLeave,
     markAbsent,
-    getLeaveById,
+    getLeavesByBatchId,
     getLeaveByUserIdAndDate,
     getPendingLeaves,
     getAbsencesByName,
@@ -35,7 +36,9 @@ const fortitudeCommAttendanceMessageThreadId = process.env.FORTITUDE_COMM_ATTEND
 const bot = new Bot(telegramBotToken);
 bot.use(conversations())
 
-const dateRegex = /^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[02])-\d{4}$/;
+const datePattern = String.raw`(?:0[1-9]|[12][0-9]|3[01])-(?:0[1-9]|1[02])-\d{4}`;
+const dateRegex = new RegExp(`^${datePattern}$`);
+const datePeriodRegex = new RegExp(`^(${datePattern})\\s+to\\s+(${datePattern})$`)
 const approveRegex = /^approve\s+(\d+)$/;
 const rejectRegex = /^reject\s+(\d+)$/;
 
@@ -85,10 +88,45 @@ function convertToEnCa(ddmmyyyyString) {
     return enCaString;
 }
 
+function parseDate(dateString) {
+    const [day, month, year] = dateString.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    if (date.getUTCFullYear() != year
+            || date.getUTCMonth() != month - 1
+            || date.getUTCDate() != day) {
+        return null;
+    }
+    return date;
+}
+
+function formatDate(date) {
+    return String(date.getUTCDate()).padStart(2, "0") + "-"
+            + String(date.getUTCMonth() + 1).padStart(2, "0") + "-"
+            + date.getUTCFullYear();
+}
+
+function getSaturdaysInPeriod(startDateString, endDateString) {
+    const startDate = parseDate(startDateString);
+    const endDate = parseDate(endDateString);
+    if (!startDate || !endDate || startDate > endDate) {
+        return [];
+    }
+
+    const dates = [];
+    const curr = new Date(startDate);
+    while (curr <= endDate) {
+        if (curr.getUTCDay() == 6) {
+            dates.push(formatDate(curr));
+        }
+        curr.setUTCDate(curr.getUTCDate() + 1);
+    }
+    return dates;
+}
+
 function isSaturday(dateString) {
-    const IsoYmdString = convertToEnCa(dateString)
-    const leaveDate = new Date(IsoYmdString);
-    return leaveDate.getDay() == 6;
+    const leaveDate = parseDate(dateString);
+    return leaveDate != null && leaveDate.getUTCDay() == 6;
 }
 
 async function countTrainings() {
@@ -175,14 +213,17 @@ async function generateTrainingMessage(date) {
 
 async function applyLeaveConversation(conversation, ctx) {
 
-    await ctx.reply("Please enter the date of requested leave in DD-MM-YYYY format\n\n"
+    await ctx.reply("Please enter all dates in DD-MM-YYYY format\n\n"
+            + "For single leave application, enter the date (e.g. 29-08-2026)\n\n"
+            + "For leave application over a period, enter the start and end date, separated by \"to\" (e.g. 29-08-2026 to 15-09-2026)\n\n"
             + "Enter `exit` to terminate this transaction");
 
+    let dates = [];
     while (true) {
         var dateCtx = await conversation.waitFor("message:text");
         var date = dateCtx.message.text;
 
-        conversation.external(() => console.log("Date Entered: ", date));
+        conversation.external(() => console.log("Date(s) Entered: ", date));
 
         if (date == "exit") {
             ctx.reply("Terminated");
@@ -190,7 +231,19 @@ async function applyLeaveConversation(conversation, ctx) {
         }
 
         if (dateRegex.test(date) && isSaturday(date)) {
+            dates = [date];
             break;
+        }
+
+        if (datePeriodRegex.test(date)) {
+            const matches = date.match(datePeriodRegex);
+            dates = getSaturdaysInPeriod(matches[1], matches[2]);
+            if (dates.length == 0) {
+                await ctx.reply("The period is invalid or contains no Saturday trainings.");
+                continue;
+            } else {
+                break;
+            }
         }
         await ctx.reply("Invalid date entered. Please try again.");
     }
@@ -214,18 +267,22 @@ async function applyLeaveConversation(conversation, ctx) {
         const name = member.name;
 
         // Apply Leave in Database
-        await applyLeave(id, name, date, reason);
+        const batchId = randomUUID();
+        for (const leaveDate of dates) {
+            await applyLeave(id, name, leaveDate, reason, batchId);
+        }
+
         await ctx.reply("Your leave application has been sent for approval");
-        const newLeave = await getLeaveByUserIdAndDate(id, date);
 
         // Notify Committee
+        const isPeriod = dates.length > 1;
         const keyboard = new InlineKeyboard()
-                .text("Approve", `approve:${newLeave.id}`)
-                .text("Reject", `reject:${newLeave.id}`);
+                .text(isPeriod ? "Approve all" : "Approve", `approve:${batchId}`)
+                .text(isPeriod ? "Reject all" : "Reject", `reject:${batchId}`);
         await bot.api.sendMessage(fortitudeCommChatId,
                 `<b>New Leave Application</b>\n`
                 + `Name: ${name}\n`
-                + `Date: ${date}\n`
+                + `${isPeriod ? "Dates" : "Date"}: ${dates.join(", ")}\n`
                 + `Reason: ${reason}`,
                 { message_thread_id: fortitudeCommAttendanceMessageThreadId,
                         parse_mode: 'HTML',
@@ -238,21 +295,30 @@ async function applyLeaveConversation(conversation, ctx) {
 bot.use(createConversation(applyLeaveConversation));
 
 async function viewPendingLeavesConversation(conversation, ctx) {
-    const indexToId = new Map()
     const pendingLeaves = await conversation.external(() => getPendingLeaves());
+    const batchesById = new Map();
+    for (const leave of pendingLeaves) {
+        const batch = batchesById.get(leave.batch_id) ?? [];
+        batch.push(leave);
+        batchesById.set(leave.batch_id, batch);
+    }
+    const pendingBatches = Array.from(
+            batchesById,
+            ([batchId, leaves]) => ({ batchId, leaves })
+    );
 
     while (true) {
         var leaveList = "";
-        if (pendingLeaves.length == 0) {
+        if (pendingBatches.length == 0) {
             ctx.reply("There are no pending leave applications.")
             return;
         }
-        for (var [index, leave] of pendingLeaves.entries()) {
+        for (const [index, batch] of pendingBatches.entries()) {
+            const leave = batch.leaves[0];
             leaveList += `${index + 1}.\n`
                     + `Name: ${leave.name}\n`
-                    + `Date: ${leave.date}\n`
+                    + `Dates: ${batch.leaves.map((item) => item.date).join(", ")}\n`
                     + `Reason: ${leave.reason}\n`
-            indexToId.set(index + 1, leave.id);
         }
         await ctx.reply("Pending Leaves:\n\n"
                 + leaveList
@@ -274,27 +340,29 @@ async function viewPendingLeavesConversation(conversation, ctx) {
         }
 
         try {
+            const idx = parseInt(reply.match(approveRegex)?.[1] ?? reply.match(rejectRegex)[1]);
+            const batch = pendingBatches[idx - 1];
+            if (!batch) {
+                await ctx.reply("Invalid index. Try again.");
+                continue;
+            }
+            const leave = batch.leaves[0];
+            const dates = batch.leaves.map((item) => item.date).join(", ");
+
             if (reply.match(approveRegex)) {
-                var idx = parseInt(reply.match(approveRegex)[1]);
-                const leaveId = indexToId.get(idx);
-                await approveLeave(leaveId);
-                const leave = pendingLeaves[idx - 1];
+                await approveLeave(batch.batchId);
                 await conversation.external(() => {
                     bot.api.sendMessage(leave.telegram_id, 
-                        `Your leave on ${leave.date} has been approved`)
+                        `Your leave application for ${dates} has been approved`)
                 });
             } else {
-                var idx = parseInt(reply.match(rejectRegex)[1]);
-                const leaveId = indexToId.get(idx);
-                await rejectLeave(leaveId);
-                const leave = pendingLeaves[idx - 1];
+                await rejectLeave(batch.batchId);
                 await conversation.external(() => {
                     bot.api.sendMessage(leave.telegram_id, 
-                        `Your leave on ${leave.date} has been rejected`)
+                        `Your leave application for ${dates} has been rejected`)
                 });
             }
-            pendingLeaves.splice(idx - 1, 1);
-            indexToId.clear();
+            pendingBatches.splice(idx - 1, 1);
         } catch (err) {
             ctx.reply(err.message);
             return;
@@ -434,18 +502,20 @@ bot.use(createConversation(viewUpcomingAttendanceConversation))
 
 bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
-    const leaveId = ctx.match[1];
+    const batchId = ctx.match[1];
     try {
-        const targetLeave = await getLeaveById(leaveId);
-        if (targetLeave.status != "PENDING") {
+        const leaves = await getLeavesByBatchId(batchId);
+        if (leaves.length == 0 || leaves.every((leave) => leave.status != "PENDING")) {
             return;
         }
-        await approveLeave(leaveId);
-        bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been approved`)
-        ctx.editMessageText(
+        const targetLeave = leaves[0];
+        const dates = leaves.map((leave) => leave.date).sort((a, b) => parseDate(a) - parseDate(b));
+        await approveLeave(batchId);
+        await bot.api.sendMessage(targetLeave.telegram_id, `Your leave application for ${dates.join(", ")} has been approved`)
+        await ctx.editMessageText(
             "<b>APPROVED</b>\n"
             + `Name: ${targetLeave.name}\n`
-            + `Date: ${targetLeave.date}\n`
+            + `Dates: ${dates.join(", ")}\n`
             + `Reason: ${targetLeave.reason}`,
             { reply_markup: undefined, parse_mode: 'HTML' }
         );
@@ -455,18 +525,21 @@ bot.callbackQuery(/^approve:(.+)$/, async (ctx) => {
 })
 
 bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
-    const leaveId = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    const batchId = ctx.match[1];
     try {
-        const targetLeave = await getLeaveById(leaveId);
-        if (targetLeave.status != "PENDING") {
+        const leaves = await getLeavesByBatchId(batchId);
+        if (leaves.length == 0 || leaves.every((leave) => leave.status != "PENDING")) {
             return;
         }
-        await rejectLeave(leaveId);
-        bot.api.sendMessage(targetLeave.telegram_id, `Your leave on ${targetLeave.date} has been rejected`)
-        ctx.editMessageText(
+        const targetLeave = leaves[0];
+        const dates = leaves.map((leave) => leave.date).sort((a, b) => parseDate(a) - parseDate(b));
+        await rejectLeave(batchId);
+        await bot.api.sendMessage(targetLeave.telegram_id, `Your leave application for ${dates.join(", ")} has been rejected`)
+        await ctx.editMessageText(
             "<b>REJECTED</b>\n"
             + `Name: ${targetLeave.name}\n`
-            + `Date: ${targetLeave.date}\n`
+            + `Dates: ${dates.join(", ")}\n`
             + `Reason: ${targetLeave.reason}`,
             { reply_markup: undefined, parse_mode: 'HTML' }
         );
