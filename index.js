@@ -36,7 +36,7 @@ const fortitudeCommAttendanceMessageThreadId = process.env.FORTITUDE_COMM_ATTEND
 const bot = new Bot(telegramBotToken);
 bot.use(conversations())
 
-const datePattern = String.raw`(?:0[1-9]|[12][0-9]|3[01])-(?:0[1-9]|1[02])-\d{4}`;
+const datePattern = String.raw`(?:0[1-9]|[12][0-9]|3[01])-(?:0[1-9]|1[0-2])-\d{4}`;
 const dateRegex = new RegExp(`^${datePattern}$`);
 const datePeriodRegex = new RegExp(`^(${datePattern})\\s+to\\s+(${datePattern})$`)
 const approveRegex = /^approve\s+(\d+)$/;
