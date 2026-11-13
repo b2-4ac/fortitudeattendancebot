@@ -551,6 +551,10 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
 // ==================== Scheduled Message ====================
 
 cron.schedule("40 7 * * 6", async () => {
+    let offDays = await getOffDays();
+    offDaysSet = new Set(offDays.map(d => d.date));
+    let todayString = new Date().toISOString().split("T")[0]
+    if (offDaysSet.has(todayString)) return;
     try {
         console.log("Time: ", new Date().toString());
         console.log("Starting Cron Job...");
