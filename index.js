@@ -552,7 +552,7 @@ bot.callbackQuery(/^reject:(.+)$/, async (ctx) => {
 
 cron.schedule("40 7 * * 6", async () => {
     let offDays = await getOffDays();
-    offDaysSet = new Set(offDays.map(d => d.date));
+    let offDaysSet = new Set(offDays.map(d => d.date));
     let todayString = new Date().toISOString().split("T")[0]
     if (offDaysSet.has(todayString)) return;
     try {
